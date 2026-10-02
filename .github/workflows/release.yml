@@ -1,0 +1,125 @@
+name: Release
+
+# Builds the GUI (`tf3se-gui`) and CLI (`tf3se-cli`) for every platform,
+# attaches SLSA build provenance attestations and publishes a GitHub release.
+# Verify a download with:
+#   gh attestation verify <file> --repo tbk/tf3-save-editor
+
+on:
+  push:
+    # Plain semantic-version tags, e.g. 1.2.3 or 1.2.3-rc.1 (no "v" prefix).
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: check version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tag must match the workspace version
+        if: github.ref_type == 'tag'
+        run: |
+          cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [[ "$GITHUB_REF_NAME" != "$cargo_version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
+            exit 1
+          fi
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, archive: tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
+          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libfontconfig-dev libfreetype-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev
+      - name: Build
+        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          version="$GITHUB_REF_NAME"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="${GITHUB_SHA::7}"
+          name="tf3-save-editor-${version}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          ext=""; [[ "${{ runner.os }}" == Windows ]] && ext=".exe"
+          for bin in tf3se-gui tf3se-cli; do
+            cp "target/${{ matrix.target }}/release/${bin}${ext}" "dist/$name/"
+          done
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cd dist
+          if [[ "${{ matrix.archive }}" == zip ]]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            echo "file=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "$name.tar.gz" "$name"
+            echo "file=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ steps.package.outputs.file }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ steps.package.outputs.file }}
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            $([[ "$GITHUB_REF_NAME" == *-* ]] && echo --prerelease) \
+            --generate-notes \
+            --notes "Build provenance: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`"

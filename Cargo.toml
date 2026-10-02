@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/lib", "crates/cli", "crates/gui"]
+default-members = ["crates/lib", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tbk/tf3-save-editor"
+authors = ["TBK"]
+rust-version = "1.99"
+
+[workspace.dependencies]
+tf3save = { path = "crates/lib" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Saves are ~200 MB uncompressed; keep parsing and zstd fast in dev builds too.
+[profile.dev.package.tf3save]
+opt-level = 3
+
+[profile.dev.package.zstd-sys]
+opt-level = 3
+
+[profile.dev.package.memchr]
+opt-level = 3

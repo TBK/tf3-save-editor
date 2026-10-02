@@ -1,0 +1,18 @@
+[package]
+name = "tf3se-cli"
+description = "Command-line Transport Fever 3 save editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tf3se-cli"
+path = "src/main.rs"
+
+[dependencies]
+tf3save.workspace = true
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"

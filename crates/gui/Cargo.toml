@@ -1,0 +1,21 @@
+[package]
+name = "tf3se-gui"
+description = "Graphical Transport Fever 3 save editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "tf3se-gui"
+path = "src/main.rs"
+
+[dependencies]
+tf3save.workspace = true
+gpui-base = "0.7.0"
+# gpui-base does not re-export GPUI; these must match the versions it pins.
+gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }

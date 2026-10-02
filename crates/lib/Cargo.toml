@@ -1,0 +1,15 @@
+[package]
+name = "tf3save"
+description = "Read and modify Transport Fever 3 save games"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = "2"
+zstd = "0.13"
+memchr = "2"
+png = "0.17"
