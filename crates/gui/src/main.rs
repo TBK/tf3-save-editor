@@ -18,6 +18,9 @@ use gpui_base::{Button, Input, Progress, ProgressIndicator, ProgressTrack, Root,
 use tf3save::SaveFile;
 use tf3save::lua::{Leaf, Value, format_number, format_scalar};
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod colors {
     pub const BG: u32 = 0x1e2127;
     pub const PANEL: u32 = 0x262a31;

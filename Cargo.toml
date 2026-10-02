@@ -13,6 +13,9 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 tf3save = { path = "crates/lib" }
+# Global allocator for both binaries: ~25% faster loads than the system
+# allocators (glibc, musl) on large saves.
+mimalloc = "0.1"
 
 [profile.release]
 lto = "thin"

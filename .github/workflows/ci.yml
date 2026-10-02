@@ -39,3 +39,28 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  static-cli:
+    name: static CLI (musl)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+      - name: Build
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked -p tf3se-cli --target x86_64-unknown-linux-musl
+      - name: Check it is static and runs
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/tf3se-cli
+          file "$bin" | tee /dev/stderr | grep -q "static"
+          "$bin" --version

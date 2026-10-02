@@ -8,6 +8,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tf3save::SaveFile;
 use tf3save::lua::{Value, format_number, format_scalar};
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(
     name = "tf3se-cli",

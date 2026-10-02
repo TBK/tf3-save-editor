@@ -8,7 +8,7 @@ fn main() {
     let bytes = std::fs::read(&path).unwrap();
     println!("read       {:?}", t.elapsed());
     let t = Instant::now();
-    let raw = zstd::stream::decode_all(&bytes[..]).unwrap();
+    let raw = tf3save::decompress(&bytes).unwrap();
     println!("decompress {:?}", t.elapsed());
     let t = Instant::now();
     let s = tf3save::SaveFile::from_raw(raw).unwrap();

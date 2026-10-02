@@ -70,7 +70,7 @@ impl SaveFile {
         if bytes.len() < 4 || bytes[..4] != [0x28, 0xb5, 0x2f, 0xfd] {
             return Err(Error::NotASave("not zstd-compressed".into()));
         }
-        let raw = zstd::stream::decode_all(bytes)?;
+        let raw = decompress(bytes)?;
         Self::from_raw(raw)
     }
 
@@ -128,7 +128,9 @@ impl SaveFile {
 
     /// Decompressed save with all edits applied.
     pub fn to_raw(&self) -> Vec<u8> {
-        let mut w = Writer::new();
+        // Edits change the size by a few bytes at most; reserve up front so
+        // the ~200 MB buffer is never regrown (and copied) while writing.
+        let mut w = Writer::with_capacity(self.raw.len() + (1 << 20));
         self.header.write(&mut w);
 
         // Splice edited sections back in offset order.
@@ -178,9 +180,21 @@ impl SaveFile {
 
 /// Compresses like the game does: one data frame followed by an empty frame.
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>> {
-    let mut out = zstd::stream::encode_all(raw, 3)?;
+    // Saves compress to roughly a third; start there to limit regrowth.
+    let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(raw.len() / 3), 3)?;
+    std::io::Write::write_all(&mut encoder, raw)?;
+    let mut out = encoder.finish()?;
     out.extend(zstd::stream::encode_all(&[][..], 3)?);
     Ok(out)
+}
+
+/// Decompresses every frame. The game doesn't record the uncompressed size,
+/// so the buffer is sized from the usual ratio (about 3.5:1) to avoid
+/// regrowing, and copying, a ~200 MB buffer several times.
+pub fn decompress(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut raw = Vec::with_capacity(bytes.len().saturating_mul(4));
+    std::io::Read::read_to_end(&mut zstd::stream::Decoder::new(bytes)?, &mut raw)?;
+    Ok(raw)
 }
 
 /// Writes a backup copy (`<name>.sav.bak`, or `.bak2`, … if taken) and

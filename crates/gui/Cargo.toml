@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 tf3save.workspace = true
+mimalloc.workspace = true
 gpui-base = "0.7.0"
 # gpui-base does not re-export GPUI; these must match the versions it pins.
 gpui = { package = "gpui-pre", version = "=0.3.7" }

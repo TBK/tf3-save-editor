@@ -88,6 +88,10 @@ impl Writer {
         Self::default()
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { buf: Vec::with_capacity(capacity) }
+    }
+
     pub fn bytes(&mut self, b: &[u8]) {
         self.buf.extend_from_slice(b);
     }

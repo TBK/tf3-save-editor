@@ -16,3 +16,5 @@ path = "src/main.rs"
 tf3save.workspace = true
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+mimalloc.workspace = true
+

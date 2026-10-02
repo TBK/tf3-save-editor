@@ -46,11 +46,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, archive: tar.gz }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
-          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
-          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, archive: tar.gz, bins: tf3se-gui tf3se-cli }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, archive: tar.gz, bins: tf3se-gui tf3se-cli }
+          # Fully static CLI (musl). The GUI can't be static: it loads
+          # Vulkan, Wayland and X11 at runtime with dlopen.
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, archive: tar.gz, bins: tf3se-cli, musl: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, archive: tar.gz, bins: tf3se-cli, musl: true }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip, bins: tf3se-gui tf3se-cli }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz, bins: tf3se-gui tf3se-cli }
+          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz, bins: tf3se-gui tf3se-cli }
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -59,15 +63,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+      - name: Install musl toolchain
+        if: matrix.musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          # C dependencies (zstd, mimalloc) must be built against musl too.
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+        env:
+          TARGET: ${{ matrix.target }}
       - name: Install Linux GUI build dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.musl
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libfontconfig-dev libfreetype-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev
       - name: Build
-        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          packages=""
+          for bin in ${{ matrix.bins }}; do packages+=" -p $bin"; done
+          cargo build --release --locked $packages --target ${{ matrix.target }}
+      - name: Check the musl build is static
+        if: matrix.musl
+        run: |
+          file target/${{ matrix.target }}/release/tf3se-cli
+          file target/${{ matrix.target }}/release/tf3se-cli | grep -q "static"
       - name: Package
         id: package
         shell: bash
@@ -77,7 +99,7 @@ jobs:
           name="tf3-save-editor-${version}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           ext=""; [[ "${{ runner.os }}" == Windows ]] && ext=".exe"
-          for bin in tf3se-gui tf3se-cli; do
+          for bin in ${{ matrix.bins }}; do
             cp "target/${{ matrix.target }}/release/${bin}${ext}" "dist/$name/"
           done
           cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"

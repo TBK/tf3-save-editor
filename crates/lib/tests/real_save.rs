@@ -27,7 +27,7 @@ macro_rules! require_save {
 fn unmodified_roundtrip_is_byte_identical() {
     let path = require_save!();
     let compressed = std::fs::read(&path).unwrap();
-    let raw = zstd::stream::decode_all(&compressed[..]).unwrap();
+    let raw = tf3save::decompress(&compressed).unwrap();
     let save = SaveFile::from_raw(raw.clone()).unwrap();
     assert!(save.journal.is_some(), "journal not found ({} matches)", save.journal_matches);
     assert!(save.scripts.is_some(), "script states not found");
