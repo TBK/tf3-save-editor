@@ -22,9 +22,10 @@ Parsed in full by `crates/lib/src/header.rs`.
 |---|---|---|
 | magic | `"tf**"` | |
 | version | u32 | 604 |
-| ? | u32 ×4 | |
+| ? | u32 ×3 | |
+| date | u32 | date shown in the game, as a Julian day number (2415021 is 1 January 1900) |
 | money | i64 | copy of the journal balance, shown in the load dialog |
-| year | u32 | in-game year |
+| experience | u32 | copy of the company's experience points; grows with play, not a year |
 | info | lua table | usually empty |
 | mods | vec<{str ×5, u32}> | id, source, path, display name, extra, flags |
 | has preview | u8 | |
@@ -110,5 +111,8 @@ with a full parse.
 
 ## Time
 
-Game time is in milliseconds. A default year lasts 730 500 ms; for example,
-a 4-year loan has a duration of 2 922 000.
+Game time is in milliseconds. At calendar speed 1.00x a day lasts 4000 ms
+and a year 1 461 000 ms; at other speeds the date shown moves faster or
+slower against the same clock. A table after the game speed component maps
+each tick to a date; see tf3-save-format's
+[calendar.md](https://github.com/WuphonsReach/tf3-save-format/blob/main/docs/calendar.md).

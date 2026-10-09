@@ -17,7 +17,7 @@ A save game editor for **Transport Fever 3**, for Linux, Windows and macOS.
 | **Money** | Set the balance. The difference is booked as an "Other" entry in the finance journal. |
 | **Game settings** | The options chosen when the game was created: `advancedOptions.*` (costs, income, inflation, maintenance), town sensitivity, industry density, … |
 | **Script state** | Every value in the game's Lua script states: loans, company progression, towns (level, experience), subsidies, mission and achievement progress, … |
-| Read-only | Title, year, mods, preview image, journal history |
+| Read-only | Title, date, mods, preview image, journal history |
 
 Values keep their type: numbers stay numbers, booleans stay booleans.
 Adding or removing table entries isn't supported.

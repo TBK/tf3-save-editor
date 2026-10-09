@@ -41,7 +41,7 @@ struct Output {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Summary: title, year, money, mods, sections found.
+    /// Summary: title, date, money, mods, sections found.
     Info { save: PathBuf },
     /// Show or set the player's money.
     Money {
@@ -260,7 +260,9 @@ fn info(s: &SaveFile) -> Result<()> {
     let h = &s.header;
     println!("title:     {}", h.title());
     println!("version:   {}", h.version);
-    println!("year:      {}", h.year);
+    let (y, m, d) = h.calendar_date();
+    println!("date:      {y}-{m:02}-{d:02}");
+    println!("experience: {}", h.experience);
     println!("money:     {}", s.money());
     for m in &h.mods {
         println!("mod:       {} ({})", m.name, m.id);
