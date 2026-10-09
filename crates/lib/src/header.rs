@@ -51,7 +51,7 @@ pub struct ModEntry {
     pub flags: u32,
 }
 
-/// Raw RGB8 preview, top-down rows.
+/// Raw RGB8 preview, bottom-up rows (the last row is the top of the picture).
 ///
 /// Kept exactly as read: `rgb` is not checked against the size until
 /// [`Thumbnail::to_png`].
@@ -72,17 +72,20 @@ impl std::fmt::Debug for Thumbnail {
 }
 
 impl Thumbnail {
-    /// Encodes the preview as PNG (useful for UIs and exports).
+    /// Encodes the preview as an upright PNG (useful for UIs and exports).
     pub fn to_png(&self) -> Result<Vec<u8>> {
         if self.rgb.len() != self.width as usize * self.height as usize * 3 {
             return Err(Error::Malformed { offset: 0, what: "thumbnail is not RGB8".into() });
         }
+        // PNG rows are top-down. `max(1)` only avoids a panic: a 0-wide image has no bytes.
+        let row = (self.width as usize * 3).max(1);
+        let upright: Vec<u8> = self.rgb.chunks_exact(row).rev().flatten().copied().collect();
         let mut out = Vec::new();
         let mut enc = png::Encoder::new(&mut out, self.width, self.height);
         enc.set_color(png::ColorType::Rgb);
         enc.set_depth(png::BitDepth::Eight);
         let mut w = enc.write_header().map_err(|e| Error::Image(e.to_string()))?;
-        w.write_image_data(&self.rgb).map_err(|e| Error::Image(e.to_string()))?;
+        w.write_image_data(&upright).map_err(|e| Error::Image(e.to_string()))?;
         w.finish().map_err(|e| Error::Image(e.to_string()))?;
         Ok(out)
     }
@@ -396,6 +399,18 @@ mod tests {
         let t = roundtrip(&section(0, 2, 2, &[7; 5])).expect("preview read");
         assert_eq!(t.rgb.len(), 5);
         assert!(t.to_png().is_err());
+    }
+
+    #[test]
+    fn png_is_flipped_upright() {
+        // Stored bottom-up: a blue bottom row, then a red top row.
+        let t = Thumbnail { flag: 0, width: 1, height: 2, rgb: vec![0, 0, 255, 255, 0, 0] };
+        let png = t.to_png().unwrap();
+        let mut reader = png::Decoder::new(&png[..]).read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height, info.color_type), (1, 2, png::ColorType::Rgb));
+        assert_eq!(&buf[..info.buffer_size()], [255, 0, 0, 0, 0, 255]);
     }
 
     #[test]

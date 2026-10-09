@@ -29,7 +29,7 @@ Parsed in full by `crates/lib/src/header.rs`.
 | mods | vec<{str ×5, u32}> | id, source, path, display name, extra, flags |
 | ? | u8 | 0 or 1; not a "has preview" flag, as saves with 0 still carry a full preview |
 | width, height | u32, u32 | 640×360 |
-| preview | str | raw RGB8, top-down |
+| preview | str | raw RGB8, rows bottom-up (as in BMP or OpenGL) |
 | stats | i64 ×6 | index 3 is a copy of the money |
 | stats | i32 ×11, vec<(u32,u32)>, u32 ×2, i64 ×9, u32 ×2 | |
 | labels | vec<{str, u32}> | e.g. `"%d Point(s) for Company Value"` |
