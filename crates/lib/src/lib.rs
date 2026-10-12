@@ -9,8 +9,10 @@
 //! Understood sections:
 //! * the header, parsed in full;
 //! * the player's [`journal`](journal::Journal), which defines the money;
-//! * the [game script states](scripts::ScriptStates).
+//! * the [game script states](scripts::ScriptStates);
+//! * the [calendar](calendar::Calendar), read only.
 
+pub mod calendar;
 pub mod header;
 pub mod io;
 pub mod journal;
@@ -19,6 +21,7 @@ pub mod scripts;
 
 use std::path::Path;
 
+use calendar::Calendar;
 use header::{Header, STATS_MONEY_INDEX};
 use io::{Reader, Writer};
 use journal::Journal;
@@ -52,6 +55,9 @@ pub struct SaveFile {
     pub header: Header,
     pub journal: Option<Journal>,
     pub scripts: Option<ScriptStates>,
+    /// The calendar speed and the table that dates clock values. Read only:
+    /// edits to it are not written back.
+    pub calendar: Option<Calendar>,
     raw: Vec<u8>,
     header_len: usize,
     journal_span: Option<(usize, usize)>,
@@ -95,6 +101,8 @@ impl SaveFile {
             None => (None, None),
         };
 
+        let calendar = Calendar::locate(&raw, header_len);
+
         if let (Some((ja, jl)), Some((sa, sl))) = (journal_span, scripts_span)
             && ja < sa + sl
             && sa < ja + jl
@@ -102,7 +110,7 @@ impl SaveFile {
             return Err(Error::Malformed { offset: ja, what: "journal overlaps script states".into() });
         }
 
-        Ok(Self { header, journal, scripts, raw, header_len, journal_span, scripts_span, journal_matches })
+        Ok(Self { header, journal, scripts, calendar, raw, header_len, journal_span, scripts_span, journal_matches })
     }
 
     /// Current money (the journal balance, or the header copy if the journal

@@ -327,7 +327,7 @@ impl GameConfig {
 
 /// Julian day number to Gregorian `(year, month, day)` (Fliegel and
 /// Van Flandern).
-fn civil_from_julian_day(jd: u32) -> (i64, u32, u32) {
+pub(crate) fn civil_from_julian_day(jd: u32) -> (i64, u32, u32) {
     let a = jd as i64 + 32044;
     let b = (4 * a + 3) / 146097;
     let c = a - 146097 * b / 4;
