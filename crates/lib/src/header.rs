@@ -22,7 +22,8 @@ pub struct Header {
     /// Player balance as shown in the load dialog. Mirrors the journal balance.
     pub money: i64,
     /// Copy of the company's experience points, which grow with play. Not
-    /// the calendar year.
+    /// the calendar year. It can lag the script state: usually by a few
+    /// points, by 242 in one catalog save.
     pub experience: u32,
     pub info_table: Table,
     pub mods: Vec<ModEntry>,
