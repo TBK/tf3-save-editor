@@ -58,7 +58,8 @@ pub struct ModEntry {
 #[derive(Clone, PartialEq)]
 pub struct Thumbnail {
     /// Byte before the size. Meaning unknown: real saves have 0 or 1, both
-    /// with a full preview, so it does not say whether an image follows.
+    /// with a full preview, so it does not say whether an image follows. In
+    /// every real save checked it equals [`GameConfig::flag`].
     pub flag: u8,
     pub width: u32,
     pub height: u32,
