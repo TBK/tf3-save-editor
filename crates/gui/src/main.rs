@@ -876,7 +876,9 @@ fn group(v: i64) -> String {
 
 /// Game time is in milliseconds and one in-game year lasts 1461 s at
 /// calendar speed 1.00x; the newest booking is taken as "now" in the save's
-/// year. Off when the game ran at other calendar speeds.
+/// year. The game's own yearly bars use the same 1,461,000-unit periods at
+/// every speed, but a booking's calendar year is off when the game ran at
+/// other calendar speeds.
 fn approx_year(ms: i64, now_ms: i64, year: i64) -> String {
     let years_ago = ((now_ms - ms) as f64 / 1_461_000.0).floor() as i64;
     format!("{}", year - years_ago)
