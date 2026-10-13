@@ -16,11 +16,15 @@ pub struct Header {
     pub version: u32,
     pub unknown_a: u32,
     pub unknown_b: [u32; 2],
-    pub unknown_c: u32,
+    /// The date shown in the game, as a Julian day number (2415021 is
+    /// 1 January 1900). See [`Header::calendar_date`].
+    pub date: u32,
     /// Player balance as shown in the load dialog. Mirrors the journal balance.
     pub money: i64,
-    /// In-game calendar year.
-    pub year: u32,
+    /// Copy of the company's experience points, which grow with play. Not
+    /// the calendar year. It can lag the script state: usually by a few
+    /// points, by 242 in one catalog save.
+    pub experience: u32,
     pub info_table: Table,
     pub mods: Vec<ModEntry>,
     pub thumbnail: Option<Thumbnail>,
@@ -124,6 +128,11 @@ impl Header {
         self.mods.first().map(|m| m.name.to_string()).unwrap_or_default()
     }
 
+    /// [`Self::date`] as a Gregorian `(year, month, day)`.
+    pub fn calendar_date(&self) -> (i64, u32, u32) {
+        civil_from_julian_day(self.date)
+    }
+
     pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self> {
         if r.bytes(4)? != MAGIC {
             return Err(Error::NotASave("missing tf** magic".into()));
@@ -131,9 +140,9 @@ impl Header {
         let version = r.u32()?;
         let unknown_a = r.u32()?;
         let unknown_b = [r.u32()?, r.u32()?];
-        let unknown_c = r.u32()?;
+        let date = r.u32()?;
         let money = r.i64()?;
-        let year = r.u32()?;
+        let experience = r.u32()?;
         let info_table = Table::read(r)?;
         let n = r.count(24)?;
         let mut mods = Vec::with_capacity(n);
@@ -180,9 +189,9 @@ impl Header {
             version,
             unknown_a,
             unknown_b,
-            unknown_c,
+            date,
             money,
-            year,
+            experience,
             info_table,
             mods,
             thumbnail,
@@ -206,9 +215,9 @@ impl Header {
         w.u32(self.unknown_a);
         w.u32(self.unknown_b[0]);
         w.u32(self.unknown_b[1]);
-        w.u32(self.unknown_c);
+        w.u32(self.date);
         w.i64(self.money);
-        w.u32(self.year);
+        w.u32(self.experience);
         self.info_table.write(w);
         w.count(self.mods.len());
         for m in &self.mods {
@@ -316,9 +325,25 @@ impl GameConfig {
     }
 }
 
+/// Julian day number to Gregorian `(year, month, day)` (Fliegel and
+/// Van Flandern).
+fn civil_from_julian_day(jd: u32) -> (i64, u32, u32) {
+    let a = jd as i64 + 32044;
+    let b = (4 * a + 3) / 146097;
+    let c = a - 146097 * b / 4;
+    let d = (4 * c + 3) / 1461;
+    let e = c - 1461 * d / 4;
+    let m = (5 * e + 2) / 153;
+    let day = e - (153 * m + 2) / 5 + 1;
+    let month = m + 3 - 12 * (m / 10);
+    let year = 100 * b + d - 4800 + m / 10;
+    (year, month as u32, day as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::civil_from_julian_day;
 
     /// A preview section built byte by byte, independent of `write_thumbnail`.
     fn section(flag: u8, width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
@@ -425,5 +450,26 @@ mod tests {
             assert_eq!(Header::read(&mut r).unwrap(), h);
             assert_eq!(r.remaining(), 0);
         }
+
+    #[test]
+    fn julian_day_to_date() {
+        assert_eq!(civil_from_julian_day(2415021), (1900, 1, 1));
+        // Dates read off the game's screen for three saves.
+        assert_eq!(civil_from_julian_day(2451652), (2000, 4, 17));
+        assert_eq!(civil_from_julian_day(2428583), (1937, 2, 18));
+        assert_eq!(civil_from_julian_day(2521351), (2191, 2, 14));
+    }
+
+    #[test]
+    fn julian_day_month_and_leap_year_edges() {
+        // 1900 is not a leap year, 2000 is.
+        assert_eq!(civil_from_julian_day(2415079), (1900, 2, 28));
+        assert_eq!(civil_from_julian_day(2415080), (1900, 3, 1));
+        assert_eq!(civil_from_julian_day(2451604), (2000, 2, 29));
+        assert_eq!(civil_from_julian_day(2451544), (1999, 12, 31));
+        assert_eq!(civil_from_julian_day(2451545), (2000, 1, 1));
+        // Latest date seen in a catalog save.
+        assert_eq!(civil_from_julian_day(2835101), (3050, 2, 21));
+
     }
 }

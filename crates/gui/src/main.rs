@@ -466,7 +466,11 @@ impl SaveEditor {
         let h = &save.header;
         let mut facts: Vec<(&str, String)> = vec![
             ("Title", h.title()),
-            ("Year", h.year.to_string()),
+            ("Date", {
+                let (y, m, d) = h.calendar_date();
+                format!("{y}-{m:02}-{d:02}")
+            }),
+            ("Experience", h.experience.to_string()),
             ("Money", group(save.money())),
             ("Format version", h.version.to_string()),
         ];
@@ -501,7 +505,7 @@ impl SaveEditor {
     fn render_money(&self, save: &SaveFile, cx: &mut Context<Self>) -> impl IntoElement {
         let editable = save.journal.is_some();
         let now = save.journal.as_ref().and_then(|j| j.entries.last()).map_or(0, |e| e.time);
-        let year = save.header.year;
+        let year = save.header.calendar_date().0;
         let recent: Vec<_> =
             save.journal.as_ref().map(|j| j.entries.iter().rev().take(200).copied().collect()).unwrap_or_default();
         v_flex()
@@ -870,11 +874,14 @@ fn group(v: i64) -> String {
     if v < 0 { format!("-{out}") } else { out }
 }
 
-/// Game time is in milliseconds and one in-game year lasts 730.5 s by
-/// default; the newest booking is taken as "now" in the save's year.
-fn approx_year(ms: i64, now_ms: i64, year: u32) -> String {
-    let years_ago = ((now_ms - ms) as f64 / 730_500.0).floor() as i64;
-    format!("{}", year as i64 - years_ago)
+/// Game time is in milliseconds and one in-game year lasts 1461 s at
+/// calendar speed 1.00x; the newest booking is taken as "now" in the save's
+/// year. The game's own yearly bars use the same 1,461,000-unit periods at
+/// every speed, but a booking's calendar year is off when the game ran at
+/// other calendar speeds.
+fn approx_year(ms: i64, now_ms: i64, year: i64) -> String {
+    let years_ago = ((now_ms - ms) as f64 / 1_461_000.0).floor() as i64;
+    format!("{}", year - years_ago)
 }
 
 fn main() {
@@ -902,5 +909,14 @@ mod tests {
         assert_eq!(super::group(-2747963), "-2,747,963");
         assert_eq!(super::group(100), "100");
         assert_eq!(super::group(1000), "1,000");
+    }
+
+    #[test]
+    fn approx_year_counts_back_at_1x() {
+        let now = 100_000_000;
+        assert_eq!(super::approx_year(now, now, 1937), "1937");
+        assert_eq!(super::approx_year(now - 1_460_999, now, 1937), "1937");
+        assert_eq!(super::approx_year(now - 1_461_000, now, 1937), "1936");
+        assert_eq!(super::approx_year(now - 10 * 1_461_000, now, 1937), "1927");
     }
 }
