@@ -470,6 +470,5 @@ mod tests {
         assert_eq!(civil_from_julian_day(2451545), (2000, 1, 1));
         // Latest date seen in a catalog save.
         assert_eq!(civil_from_julian_day(2835101), (3050, 2, 21));
-
     }
 }
