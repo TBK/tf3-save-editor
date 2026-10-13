@@ -55,9 +55,16 @@ pub struct ModEntry {
     pub flags: u32,
 }
 
-/// Raw RGB8 preview, top-down rows.
+/// Raw RGB8 preview, bottom-up rows (the last row is the top of the picture).
+///
+/// Kept exactly as read: `rgb` is not checked against the size until
+/// [`Thumbnail::to_png`].
 #[derive(Clone, PartialEq)]
 pub struct Thumbnail {
+    /// Byte before the size. Meaning unknown: real saves have 0 or 1, both
+    /// with a full preview, so it does not say whether an image follows. In
+    /// every real save checked it equals [`GameConfig::flag`].
+    pub flag: u8,
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
@@ -70,17 +77,20 @@ impl std::fmt::Debug for Thumbnail {
 }
 
 impl Thumbnail {
-    /// Encodes the preview as PNG (useful for UIs and exports).
+    /// Encodes the preview as an upright PNG (useful for UIs and exports).
     pub fn to_png(&self) -> Result<Vec<u8>> {
         if self.rgb.len() != self.width as usize * self.height as usize * 3 {
             return Err(Error::Malformed { offset: 0, what: "thumbnail is not RGB8".into() });
         }
+        // PNG rows are top-down. `max(1)` only avoids a panic: a 0-wide image has no bytes.
+        let row = (self.width as usize * 3).max(1);
+        let upright: Vec<u8> = self.rgb.chunks_exact(row).rev().flatten().copied().collect();
         let mut out = Vec::new();
         let mut enc = png::Encoder::new(&mut out, self.width, self.height);
         enc.set_color(png::ColorType::Rgb);
         enc.set_depth(png::BitDepth::Eight);
         let mut w = enc.write_header().map_err(|e| Error::Image(e.to_string()))?;
-        w.write_image_data(&self.rgb).map_err(|e| Error::Image(e.to_string()))?;
+        w.write_image_data(&upright).map_err(|e| Error::Image(e.to_string()))?;
         w.finish().map_err(|e| Error::Image(e.to_string()))?;
         Ok(out)
     }
@@ -146,14 +156,7 @@ impl Header {
                 flags: r.u32()?,
             });
         }
-        let has_thumb = r.u8()?;
-        let width = r.u32()?;
-        let height = r.u32()?;
-        let rgb = r.string()?;
-        let thumbnail = (has_thumb != 0).then_some(Thumbnail { width, height, rgb });
-        if has_thumb == 0 && (width != 0 || height != 0) {
-            return Err(Error::Malformed { offset: r.pos(), what: "thumbnail size without image".into() });
-        }
+        let thumbnail = read_thumbnail(r)?;
         let mut stats_i64 = [0; 6];
         for v in &mut stats_i64 {
             *v = r.i64()?;
@@ -223,20 +226,7 @@ impl Header {
             }
             w.u32(m.flags);
         }
-        match &self.thumbnail {
-            Some(t) => {
-                w.u8(1);
-                w.u32(t.width);
-                w.u32(t.height);
-                w.string(&t.rgb);
-            }
-            None => {
-                w.u8(0);
-                w.u32(0);
-                w.u32(0);
-                w.u32(0);
-            }
-        }
+        write_thumbnail(self.thumbnail.as_ref(), w);
         self.stats_i64.iter().for_each(|v| w.i64(*v));
         self.stats_i32.iter().for_each(|v| w.i32(*v));
         w.count(self.stats_pairs.len());
@@ -256,6 +246,35 @@ impl Header {
         self.stats3_i64.iter().for_each(|v| w.i64(*v));
         w.u32(self.unknown_d);
         self.config.write(w);
+    }
+}
+
+/// Reads the preview section. Only the bytes [`write_thumbnail`] emits for
+/// `None` read back as `None`; anything else is kept as read, so every save
+/// round-trips.
+fn read_thumbnail(r: &mut Reader<'_>) -> Result<Option<Thumbnail>> {
+    let flag = r.u8()?;
+    let width = r.u32()?;
+    let height = r.u32()?;
+    let rgb = r.string()?;
+    let empty = flag == 0 && width == 0 && height == 0 && rgb.is_empty();
+    Ok((!empty).then_some(Thumbnail { flag, width, height, rgb }))
+}
+
+fn write_thumbnail(t: Option<&Thumbnail>, w: &mut Writer) {
+    match t {
+        Some(t) => {
+            w.u8(t.flag);
+            w.u32(t.width);
+            w.u32(t.height);
+            w.string(&t.rgb);
+        }
+        None => {
+            w.u8(0);
+            w.u32(0);
+            w.u32(0);
+            w.u32(0);
+        }
     }
 }
 
@@ -323,7 +342,114 @@ fn civil_from_julian_day(jd: u32) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::civil_from_julian_day;
+    use super::*;
+
+    /// A preview section built byte by byte, independent of `write_thumbnail`.
+    fn section(flag: u8, width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u8(flag);
+        w.u32(width);
+        w.u32(height);
+        w.string(rgb);
+        w.buf
+    }
+
+    /// Reads a preview section, checks it writes back unchanged and returns it.
+    fn roundtrip(bytes: &[u8]) -> Option<Thumbnail> {
+        let mut r = Reader::new(bytes);
+        let t = read_thumbnail(&mut r).unwrap();
+        assert_eq!(r.remaining(), 0);
+        let mut w = Writer::new();
+        write_thumbnail(t.as_ref(), &mut w);
+        assert_eq!(w.buf, bytes, "preview section not written back as read");
+        t
+    }
+
+    fn sample() -> Header {
+        Header {
+            version: 604,
+            unknown_a: 0,
+            unknown_b: [0; 2],
+            date: 0,
+            money: 0,
+            experience: 0,
+            info_table: Table::default(),
+            mods: Vec::new(),
+            thumbnail: None,
+            stats_i64: [0; 6],
+            stats_i32: [0; 11],
+            stats_pairs: Vec::new(),
+            stats_u32: [0; 2],
+            stats2_i64: [0; 9],
+            stats2_u32: [0; 2],
+            labels: Vec::new(),
+            stats3_u32: 0,
+            stats3_i64: [0; 2],
+            unknown_d: 0,
+            config: GameConfig {
+                mod_ids: Vec::new(),
+                resources: Vec::new(),
+                params: Vec::new(),
+                mission: LuaString::default(),
+                kind: LuaString::default(),
+                flag: 0,
+                value: 0,
+                id: LuaString::default(),
+            },
+        }
+    }
+
+    #[test]
+    fn preview_with_flag_0_is_kept() {
+        let rgb: Vec<u8> = (0..12).collect();
+        let t = roundtrip(&section(0, 2, 2, &rgb)).expect("preview read");
+        assert_eq!((t.flag, t.width, t.height), (0, 2, 2));
+        assert_eq!(t.rgb, rgb);
+        assert!(t.to_png().is_ok());
+    }
+
+    #[test]
+    fn preview_with_flag_1_is_kept() {
+        let t = roundtrip(&section(1, 2, 2, &[7; 12])).expect("preview read");
+        assert_eq!(t.flag, 1);
+    }
+
+    #[test]
+    fn empty_preview_reads_as_none() {
+        assert!(roundtrip(&section(0, 0, 0, &[])).is_none());
+    }
+
+    #[test]
+    fn preview_of_wrong_length_is_kept_but_not_encoded() {
+        let t = roundtrip(&section(0, 2, 2, &[7; 5])).expect("preview read");
+        assert_eq!(t.rgb.len(), 5);
+        assert!(t.to_png().is_err());
+    }
+
+    #[test]
+    fn png_is_flipped_upright() {
+        // Stored bottom-up: a blue bottom row, then a red top row.
+        let t = Thumbnail { flag: 0, width: 1, height: 2, rgb: vec![0, 0, 255, 255, 0, 0] };
+        let png = t.to_png().unwrap();
+        let mut reader = png::Decoder::new(&png[..]).read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height, info.color_type), (1, 2, png::ColorType::Rgb));
+        assert_eq!(&buf[..info.buffer_size()], [255, 0, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn header_roundtrip_keeps_preview() {
+        for flag in [0, 1] {
+            let mut h = sample();
+            h.thumbnail = Some(Thumbnail { flag, width: 2, height: 1, rgb: vec![1, 2, 3, 4, 5, 6] });
+            let mut w = Writer::new();
+            h.write(&mut w);
+            let mut r = Reader::new(&w.buf);
+            assert_eq!(Header::read(&mut r).unwrap(), h);
+            assert_eq!(r.remaining(), 0);
+        }
+    }
 
     #[test]
     fn julian_day_to_date() {
