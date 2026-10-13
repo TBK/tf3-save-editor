@@ -449,6 +449,7 @@ mod tests {
             let mut r = Reader::new(&w.buf);
             assert_eq!(Header::read(&mut r).unwrap(), h);
             assert_eq!(r.remaining(), 0);
+        }
     }
 
     #[test]
