@@ -343,7 +343,6 @@ fn civil_from_julian_day(jd: u32) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::civil_from_julian_day;
 
     /// A preview section built byte by byte, independent of `write_thumbnail`.
     fn section(flag: u8, width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
@@ -371,9 +370,9 @@ mod tests {
             version: 604,
             unknown_a: 0,
             unknown_b: [0; 2],
-            unknown_c: 0,
+            date: 0,
             money: 0,
-            year: 0,
+            experience: 0,
             info_table: Table::default(),
             mods: Vec::new(),
             thumbnail: None,
