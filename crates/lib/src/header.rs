@@ -6,7 +6,7 @@
 
 use crate::io::{Reader, Writer};
 use crate::lua::{LuaString, Table};
-use crate::{Error, Result};
+use crate::{Error, MIN_VERSION, Result};
 
 pub const MAGIC: &[u8; 4] = b"tf**";
 
@@ -138,6 +138,9 @@ impl Header {
             return Err(Error::NotASave("missing tf** magic".into()));
         }
         let version = r.u32()?;
+        if version < MIN_VERSION {
+            return Err(Error::UnsupportedVersion(version));
+        }
         let unknown_a = r.u32()?;
         let unknown_b = [r.u32()?, r.u32()?];
         let date = r.u32()?;
@@ -396,6 +399,37 @@ mod tests {
                 value: 0,
                 id: LuaString::default(),
             },
+        }
+    }
+
+    /// Just the magic and a version, so only the version check can answer.
+    fn magic_and_version(version: u32) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.bytes(MAGIC);
+        w.u32(version);
+        w.buf
+    }
+
+    #[test]
+    fn versions_before_599_are_rejected_up_front() {
+        for v in [0, 543, 568, 585, MIN_VERSION - 1] {
+            let bytes = magic_and_version(v);
+            match Header::read(&mut Reader::new(&bytes)) {
+                Err(Error::UnsupportedVersion(got)) => assert_eq!(got, v),
+                other => panic!("version {v}: expected UnsupportedVersion, got {other:?}"),
+            }
+        }
+        let msg = Error::UnsupportedVersion(568).to_string();
+        assert_eq!(msg, "unsupported format version 568 (this editor reads version 599 and newer)");
+    }
+
+    #[test]
+    fn versions_from_599_pass_the_check() {
+        // Cut off after the version: anything but UnsupportedVersion will do.
+        for v in [MIN_VERSION, 601, 604, 700] {
+            let bytes = magic_and_version(v);
+            let err = Header::read(&mut Reader::new(&bytes)).unwrap_err();
+            assert!(!matches!(err, Error::UnsupportedVersion(_)), "version {v}: {err}");
         }
     }
 

@@ -2,6 +2,11 @@
 
 Describes save format version **604**. All integers are little-endian.
 
+The reader accepts versions 599 and newer. 599 and 601 have the same header
+as 604. Versions 568 and 585 match it up to and including the preview and
+then differ, so they are rejected with "unsupported format version" (see
+`MIN_VERSION`).
+
 ## Container
 
 A `.sav` file is zstd. The game writes one frame with the data, then an

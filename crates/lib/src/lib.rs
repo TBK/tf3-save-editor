@@ -27,6 +27,12 @@ use scripts::ScriptStates;
 /// Save format version this crate was written against.
 pub const KNOWN_VERSION: u32 = 604;
 
+/// Oldest format version [`Header::read`] accepts. Versions 599 and 601 have
+/// the same header as 604. Older ones (568 and 585 were seen) share it up to
+/// the preview and then differ, so they are rejected instead of failing deep
+/// in the stats block.
+pub const MIN_VERSION: u32 = 599;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("I/O error: {0}")]
@@ -37,6 +43,8 @@ pub enum Error {
     UnexpectedEof { offset: usize, wanted: usize },
     #[error("malformed data at offset {offset:#x}: {what}")]
     Malformed { offset: usize, what: String },
+    #[error("unsupported format version {0} (this editor reads version {MIN_VERSION} and newer)")]
+    UnsupportedVersion(u32),
     #[error("{0}")]
     Invalid(String),
     #[error("{0} not found in this save")]
