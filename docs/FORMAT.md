@@ -21,34 +21,74 @@ Notation: `str` is a `u32` length followed by that many bytes. `vec<T>` is a
 
 ## Header
 
-Parsed in full by `crates/lib/src/header.rs`.
+Parsed in full by `crates/lib/src/header.rs`. The field column uses the
+Rust field names, and a dotted name in backticks is a field of a field.
+Strings stored in the save, such as the keys of a Lua table, are in double
+quotes.
 
 | field | type | notes |
 |---|---|---|
 | magic | `"tf**"` | |
-| version | u32 | 604 |
-| ? | u32 ×3 | |
-| date | u32 | date shown in the game, as a Julian day number (2415021 is 1 January 1900) |
-| money | i64 | copy of the journal balance, shown in the load dialog |
-| experience | u32 | copy of the company's experience points; grows with play, not a year |
-| info | lua table | usually empty |
-| mods | vec<{str ×5, u32}> | id, source, path, display name, extra, flags |
-| ? | u8 | 0 or 1; not a "has preview" flag, as saves with 0 still carry a full preview |
-| width, height | u32, u32 | 640×360 |
-| preview | str | raw RGB8, rows bottom-up (as in BMP or OpenGL) |
-| stats | i64 ×6 | index 3 is a copy of the money |
-| stats | i32 ×11, vec<(u32,u32)>, u32 ×2, i64 ×9, u32 ×2 | |
-| labels | vec<{str, u32}> | e.g. `"%d Point(s) for Company Value"` |
-| stats | u32, i64 ×2, u32 | |
-| config.mods | vec<str> | |
-| config.resources | vec<(str, str)> | `climate`, `economy`, `nameList` |
-| config.params | vec<(str, lua table)> | the empty key holds the base settings: `advancedOptions.*`, `townConfig.*`, `map.size`, … |
-| config.mission, kind | str, str | |
-| config flag, value | u8, u32 | |
-| config.id | str | |
+| `version` | u32 | 604 |
+| `start_year` | u32 | year the game was started |
+| `map_width`, `map_height` | u32, u32 | map size in metres, see [Map size](#map-size) |
+| `date` | u32 | date shown in the game, as a Julian day number (2415021 is 1 January 1900) |
+| `money` | i64 | copy of the journal balance, shown in the load dialog |
+| `experience` | u32 | copy of the company's experience points; grows with play, not a year |
+| `info_table` | lua table | key "company.level" (1 to 15) in most saves |
+| `mods` | vec<{str ×5, u32}> | per mod: `id`, `source`, `path`, `name`, `extra`, `flags`; `extra` is the mod's web page URL when it has one, `flags` is 0, 1 or 2 |
+| `achievements_earnable` | u8 | 1 if achievements can be earned, 0 if not; the game writes it at every save, from the mod list |
+| `thumbnail.width`, `thumbnail.height` | u32, u32 | 640×360 |
+| `thumbnail.rgb` | str | raw RGB8, rows bottom-up (as in BMP or OpenGL) |
+| `stats_i64` | i64 ×6 | index 3 is a copy of the money |
+| `stats_i32` | i32 ×11 | |
+| `stats_pairs` | vec<(u32,u32)> | |
+| `stats_u32` | u32 ×2 | |
+| `stats2_i64` | i64 ×9 | |
+| `stats2_u32` | u32 ×2 | |
+| `labels` | vec<{str, u32}> | e.g. "%d Point(s) for Company Value" |
+| `stats3_u32` | u32 | |
+| `stats3_i64` | i64 ×2 | |
+| `unknown_d` | u32 | meaning not known |
+| `config.mod_ids` | vec<str> | |
+| `config.resources` | vec<(str, str)> | keys "climate", "economy", "nameList" |
+| `config.params` | vec<(str, lua table)> | the empty key "" holds the base settings: "advancedOptions.*", "townConfig.*", "map.size", … |
+| `config.mission`, `config.kind` | str, str | |
+| `config.achievements_earnable` | u8 | same value as `achievements_earnable` |
+| `config.value` | u32 | meaning not known |
+| `config.id` | str | |
 
 The game configuration is stored only here, so editing it really changes
 the game's settings.
+
+### Map size
+
+The header's width and height give the size of the map in metres. The
+settings hold it as two options:
+
+* "map.size" (Map Size) and "map.format" (Map Format) are 1-based positions
+  in the New Game option lists: Map Size 1 is Tiny and 8 is Gigantomaniac,
+  Map Format 1 is 1 : 1 and 5 is 1 : 5. Map Format is unrelated to the save
+  format version.
+* Each Map Size is a set area and the Map Format only changes its shape, so
+  a 1 : 2 map of a size has about the same area as its 1 : 1 map, as a
+  longer and narrower rectangle.
+* A save can store a "map.size" or "map.format" that does not match its
+  width and height.
+
+| "map.size" | 1 : 1 map, m | km² |
+|---|---|---|
+| 1 Tiny | not seen | – |
+| 2 Small | 8192 × 8192 | 67.11 |
+| 3 Medium | 11264 × 11264 | 126.88 |
+| 4 Large | 14336 × 14336 | 205.52 |
+| 5 Very Large | 16384 × 16384 | 268.44 |
+| 6 Huge | 20480 × 20480 | 419.43 |
+| 7 Megalomaniac | 24576 × 24576 | 603.98 |
+| 8 Gigantomaniac | 28672 × 28672 | 822.08 |
+
+The Load Game dialog shows its "experimental" notice for a stored
+"map.size" of 1 or 6-8 and a "map.format" of 4 or 5.
 
 ## Lua values
 
