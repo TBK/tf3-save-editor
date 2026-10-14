@@ -16,6 +16,7 @@ use gpui::{
 use gpui_base::input::{InputEvent, InputState};
 use gpui_base::{Button, Input, Progress, ProgressIndicator, ProgressTrack, Root, Scrollbar, h_flex, v_flex};
 use tf3save::SaveFile;
+use tf3save::calendar::Calendar;
 use tf3save::lua::{Leaf, Value, format_number, format_scalar};
 
 #[global_allocator]
@@ -506,6 +507,7 @@ impl SaveEditor {
         let editable = save.journal.is_some();
         let now = save.journal.as_ref().and_then(|j| j.entries.last()).map_or(0, |e| e.time);
         let year = save.header.calendar_date().0;
+        let calendar = save.calendar.as_ref();
         let recent: Vec<_> =
             save.journal.as_ref().map(|j| j.entries.iter().rev().take(200).copied().collect()).unwrap_or_default();
         v_flex()
@@ -540,7 +542,7 @@ impl SaveEditor {
                             .gap_3()
                             .px_2()
                             .py(px(2.))
-                            .child(div().w(px(110.)).text_color(rgb(colors::MUTED)).child(approx_year(e.time, now, year)))
+                            .child(div().w(px(110.)).text_color(rgb(colors::MUTED)).child(booking_year(calendar, e.time, now, year)))
                             .child(
                                 div()
                                     .w(px(140.))
@@ -874,11 +876,20 @@ fn group(v: i64) -> String {
     if v < 0 { format!("-{out}") } else { out }
 }
 
+/// The calendar year of a booking: from the save's day table when it has
+/// one, else the approximation of [`approx_year`].
+fn booking_year(calendar: Option<&Calendar>, ms: i64, now_ms: i64, year: i64) -> String {
+    match calendar.and_then(|c| c.date_at(ms)) {
+        Some((y, _, _)) => y.to_string(),
+        None => approx_year(ms, now_ms, year),
+    }
+}
+
 /// Game time is in milliseconds and one in-game year lasts 1461 s at
 /// calendar speed 1.00x; the newest booking is taken as "now" in the save's
 /// year. The game's own yearly bars use the same 1,461,000-unit periods at
 /// every speed, but a booking's calendar year is off when the game ran at
-/// other calendar speeds.
+/// other calendar speeds. Only used when the save has no day table.
 fn approx_year(ms: i64, now_ms: i64, year: i64) -> String {
     let years_ago = ((now_ms - ms) as f64 / 1_461_000.0).floor() as i64;
     format!("{}", year - years_ago)
@@ -904,11 +915,28 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use tf3save::calendar::{Calendar, DayStart};
+
     #[test]
     fn grouping() {
         assert_eq!(super::group(-2747963), "-2,747,963");
         assert_eq!(super::group(100), "100");
         assert_eq!(super::group(1000), "1,000");
+    }
+
+    #[test]
+    fn booking_year_follows_the_day_table() {
+        // 4.00x for a year: 1000 ticks a day, so 1901 starts at tick 365,000.
+        let c = Calendar {
+            millis_per_day: 1000,
+            play_speed: 0,
+            clock: 400_000,
+            days: vec![DayStart { tick: 0, day: 2415021 }, DayStart { tick: 365_000, day: 2415386 }],
+        };
+        assert_eq!(super::booking_year(Some(&c), 364_999, 400_000, 1901), "1900");
+        assert_eq!(super::booking_year(Some(&c), 365_000, 400_000, 1901), "1901");
+        // Without a table it falls back to counting back at 1.00x.
+        assert_eq!(super::booking_year(None, 364_999, 400_000, 1901), "1901");
     }
 
     #[test]

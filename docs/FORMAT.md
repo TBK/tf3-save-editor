@@ -119,5 +119,36 @@ with a full parse.
 Game time is in milliseconds. At calendar speed 1.00x a day lasts 4000 ms
 and a year 1 461 000 ms; at other speeds the date shown moves faster or
 slower against the same clock. A table after the game speed component maps
-each tick to a date; see tf3-save-format's
+each tick to a date (below).
+
+## Calendar
+
+The game speed component sits in the entity data and nothing names it, so
+the editor finds it by its bytes (`crates/lib/src/calendar.rs`) and requires
+exactly one match. It is read only.
+
+```
+u64 9, u32 1
+u32 millisPerDay      4000 at 1.00x, 0 when the calendar is stopped
+u32 playSpeed         0 in a save written with the game paused
+u64 0
+u32 1, u64 8, u32 1
+u64 t1                the game clock when saved
+u8 1
+u64 t2
+u32 n
+n x { u64 tick, u32 day }
+```
+
+`day` is a Julian day number and `tick` the clock value at which that day
+started. The date of a clock value is the last entry at or before it, which
+gives a booking its date at whatever speed the game ran. The header's `date`
+is the last entry's day. The table has one entry per day while the game runs,
+so the gap between entries is the day's length at the speed then; a stopped
+calendar makes one long day. Not every table is one entry per day: dates can
+be set, which leaves jumps.
+
+Found exactly once, with the last day equal to the header `date` and ticks
+never decreasing, in all 198 saves of format 599 to 604 in the mod.io catalog
+(2026-10). See tf3-save-format's
 [calendar.md](https://github.com/WuphonsReach/tf3-save-format/blob/main/docs/calendar.md).
