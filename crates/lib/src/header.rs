@@ -14,8 +14,12 @@ pub const MAGIC: &[u8; 4] = b"tf**";
 pub struct Header {
     /// Save format version (604 for the game build this was written against).
     pub version: u32,
-    pub unknown_a: u32,
-    pub unknown_b: [u32; 2],
+    /// Year the game was started.
+    pub start_year: u32,
+    /// Width of the map in metres.
+    pub map_width: u32,
+    /// Height of the map in metres.
+    pub map_height: u32,
     /// The date shown in the game, as a Julian day number (2415021 is
     /// 1 January 1900). See [`Header::calendar_date`].
     pub date: u32,
@@ -27,6 +31,10 @@ pub struct Header {
     pub experience: u32,
     pub info_table: Table,
     pub mods: Vec<ModEntry>,
+    /// 1 if achievements can be earned in this save, 0 if not. The game
+    /// writes it at every save, from the mod list. Holds the same value as
+    /// [`GameConfig::achievements_earnable`].
+    pub achievements_earnable: u8,
     pub thumbnail: Option<Thumbnail>,
     /// Summary statistics. Index 3 mirrors the balance.
     pub stats_i64: [i64; 6],
@@ -61,10 +69,6 @@ pub struct ModEntry {
 /// [`Thumbnail::to_png`].
 #[derive(Clone, PartialEq)]
 pub struct Thumbnail {
-    /// Byte before the size. Meaning unknown: real saves have 0 or 1, both
-    /// with a full preview, so it does not say whether an image follows. In
-    /// every real save checked it equals [`GameConfig::flag`].
-    pub flag: u8,
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
@@ -107,7 +111,8 @@ pub struct GameConfig {
     pub params: Vec<(LuaString, Table)>,
     pub mission: LuaString,
     pub kind: LuaString,
-    pub flag: u8,
+    /// Same value as [`Header::achievements_earnable`].
+    pub achievements_earnable: u8,
     pub value: u32,
     pub id: LuaString,
 }
@@ -141,8 +146,9 @@ impl Header {
         if version < MIN_VERSION {
             return Err(Error::UnsupportedVersion(version));
         }
-        let unknown_a = r.u32()?;
-        let unknown_b = [r.u32()?, r.u32()?];
+        let start_year = r.u32()?;
+        let map_width = r.u32()?;
+        let map_height = r.u32()?;
         let date = r.u32()?;
         let money = r.i64()?;
         let experience = r.u32()?;
@@ -159,6 +165,7 @@ impl Header {
                 flags: r.u32()?,
             });
         }
+        let achievements_earnable = r.u8()?;
         let thumbnail = read_thumbnail(r)?;
         let mut stats_i64 = [0; 6];
         for v in &mut stats_i64 {
@@ -190,13 +197,15 @@ impl Header {
         let config = GameConfig::read(r)?;
         Ok(Self {
             version,
-            unknown_a,
-            unknown_b,
+            start_year,
+            map_width,
+            map_height,
             date,
             money,
             experience,
             info_table,
             mods,
+            achievements_earnable,
             thumbnail,
             stats_i64,
             stats_i32,
@@ -215,9 +224,9 @@ impl Header {
     pub(crate) fn write(&self, w: &mut Writer) {
         w.bytes(MAGIC);
         w.u32(self.version);
-        w.u32(self.unknown_a);
-        w.u32(self.unknown_b[0]);
-        w.u32(self.unknown_b[1]);
+        w.u32(self.start_year);
+        w.u32(self.map_width);
+        w.u32(self.map_height);
         w.u32(self.date);
         w.i64(self.money);
         w.u32(self.experience);
@@ -229,6 +238,7 @@ impl Header {
             }
             w.u32(m.flags);
         }
+        w.u8(self.achievements_earnable);
         write_thumbnail(self.thumbnail.as_ref(), w);
         self.stats_i64.iter().for_each(|v| w.i64(*v));
         self.stats_i32.iter().for_each(|v| w.i32(*v));
@@ -256,24 +266,21 @@ impl Header {
 /// `None` read back as `None`; anything else is kept as read, so every save
 /// round-trips.
 fn read_thumbnail(r: &mut Reader<'_>) -> Result<Option<Thumbnail>> {
-    let flag = r.u8()?;
     let width = r.u32()?;
     let height = r.u32()?;
     let rgb = r.string()?;
-    let empty = flag == 0 && width == 0 && height == 0 && rgb.is_empty();
-    Ok((!empty).then_some(Thumbnail { flag, width, height, rgb }))
+    let empty = width == 0 && height == 0 && rgb.is_empty();
+    Ok((!empty).then_some(Thumbnail { width, height, rgb }))
 }
 
 fn write_thumbnail(t: Option<&Thumbnail>, w: &mut Writer) {
     match t {
         Some(t) => {
-            w.u8(t.flag);
             w.u32(t.width);
             w.u32(t.height);
             w.string(&t.rgb);
         }
         None => {
-            w.u8(0);
             w.u32(0);
             w.u32(0);
             w.u32(0);
@@ -301,7 +308,7 @@ impl GameConfig {
             params,
             mission: LuaString(r.string()?),
             kind: LuaString(r.string()?),
-            flag: r.u8()?,
+            achievements_earnable: r.u8()?,
             value: r.u32()?,
             id: LuaString(r.string()?),
         })
@@ -322,7 +329,7 @@ impl GameConfig {
         }
         w.string(&self.mission.0);
         w.string(&self.kind.0);
-        w.u8(self.flag);
+        w.u8(self.achievements_earnable);
         w.u32(self.value);
         w.string(&self.id.0);
     }
@@ -348,9 +355,8 @@ mod tests {
     use super::*;
 
     /// A preview section built byte by byte, independent of `write_thumbnail`.
-    fn section(flag: u8, width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
+    fn section(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
         let mut w = Writer::new();
-        w.u8(flag);
         w.u32(width);
         w.u32(height);
         w.string(rgb);
@@ -371,13 +377,16 @@ mod tests {
     fn sample() -> Header {
         Header {
             version: 604,
-            unknown_a: 0,
-            unknown_b: [0; 2],
+            // Distinct values, so a swapped field order fails the round trip.
+            start_year: 1950,
+            map_width: 8192,
+            map_height: 16384,
             date: 0,
             money: 0,
             experience: 0,
             info_table: Table::default(),
             mods: Vec::new(),
+            achievements_earnable: 1,
             thumbnail: None,
             stats_i64: [0; 6],
             stats_i32: [0; 11],
@@ -395,7 +404,7 @@ mod tests {
                 params: Vec::new(),
                 mission: LuaString::default(),
                 kind: LuaString::default(),
-                flag: 0,
+                achievements_earnable: 1,
                 value: 0,
                 id: LuaString::default(),
             },
@@ -434,28 +443,22 @@ mod tests {
     }
 
     #[test]
-    fn preview_with_flag_0_is_kept() {
+    fn preview_is_kept() {
         let rgb: Vec<u8> = (0..12).collect();
-        let t = roundtrip(&section(0, 2, 2, &rgb)).expect("preview read");
-        assert_eq!((t.flag, t.width, t.height), (0, 2, 2));
+        let t = roundtrip(&section(2, 2, &rgb)).expect("preview read");
+        assert_eq!((t.width, t.height), (2, 2));
         assert_eq!(t.rgb, rgb);
         assert!(t.to_png().is_ok());
     }
 
     #[test]
-    fn preview_with_flag_1_is_kept() {
-        let t = roundtrip(&section(1, 2, 2, &[7; 12])).expect("preview read");
-        assert_eq!(t.flag, 1);
-    }
-
-    #[test]
     fn empty_preview_reads_as_none() {
-        assert!(roundtrip(&section(0, 0, 0, &[])).is_none());
+        assert!(roundtrip(&section(0, 0, &[])).is_none());
     }
 
     #[test]
     fn preview_of_wrong_length_is_kept_but_not_encoded() {
-        let t = roundtrip(&section(0, 2, 2, &[7; 5])).expect("preview read");
+        let t = roundtrip(&section(2, 2, &[7; 5])).expect("preview read");
         assert_eq!(t.rgb.len(), 5);
         assert!(t.to_png().is_err());
     }
@@ -463,7 +466,7 @@ mod tests {
     #[test]
     fn png_is_flipped_upright() {
         // Stored bottom-up: a blue bottom row, then a red top row.
-        let t = Thumbnail { flag: 0, width: 1, height: 2, rgb: vec![0, 0, 255, 255, 0, 0] };
+        let t = Thumbnail { width: 1, height: 2, rgb: vec![0, 0, 255, 255, 0, 0] };
         let png = t.to_png().unwrap();
         let mut reader = png::Decoder::new(&png[..]).read_info().unwrap();
         let mut buf = vec![0; reader.output_buffer_size()];
@@ -473,15 +476,20 @@ mod tests {
     }
 
     #[test]
-    fn header_roundtrip_keeps_preview() {
-        for flag in [0, 1] {
-            let mut h = sample();
-            h.thumbnail = Some(Thumbnail { flag, width: 2, height: 1, rgb: vec![1, 2, 3, 4, 5, 6] });
-            let mut w = Writer::new();
-            h.write(&mut w);
-            let mut r = Reader::new(&w.buf);
-            assert_eq!(Header::read(&mut r).unwrap(), h);
-            assert_eq!(r.remaining(), 0);
+    fn header_roundtrip_keeps_preview_and_flag() {
+        // Both values, with and without a preview: the flag does not depend on it.
+        for achievements_earnable in [0, 1] {
+            for thumbnail in [None, Some(Thumbnail { width: 2, height: 1, rgb: vec![1, 2, 3, 4, 5, 6] })] {
+                let mut h = sample();
+                h.achievements_earnable = achievements_earnable;
+                h.config.achievements_earnable = 1 - achievements_earnable;
+                h.thumbnail = thumbnail;
+                let mut w = Writer::new();
+                h.write(&mut w);
+                let mut r = Reader::new(&w.buf);
+                assert_eq!(Header::read(&mut r).unwrap(), h);
+                assert_eq!(r.remaining(), 0);
+            }
         }
     }
 
