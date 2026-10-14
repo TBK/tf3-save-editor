@@ -109,13 +109,17 @@ order.
 ## Player journal (money)
 
 The engine keeps a journal per entity: a time-ordered list of bookings
-followed by the cached balance. The player's money **is** that balance.
+followed by a stored balance. The player's money is the sum of the amounts.
 
 ```
 u32 count
 count × { i64 time_ms, i64 amount, u8 type, u8 construction, u8 maintenance, u8 other, u8 carrier }
-i64 balance        // == sum(amount)
+i64 balance        // the header's money; sum(amount) in most saves
 ```
+
+The stored balance and the sum differ in some saves (67 of the 198 catalog
+saves that load). In one of them the header holds 0 and the sum is
+-18,153,221; the game shows -18,153,221 (**Observed**, one save).
 
 Category enums:
 
@@ -128,10 +132,42 @@ Category enums:
 * carrier: ROAD 0, RAIL 1, TRAM 2, OTHER 3, AIR 4, WATER 5
 
 The starting capital is booked as `(6, 6, 2, 0, 3)`, that is OTHER for every
-field. To find the journal, the editor scans for a stream that validates as
-a journal and whose balance equals the header's money. To change money, it
-appends an OTHER booking for the difference and updates both header copies.
-A save edited this way loads in the game with the new balance.
+field. To change money, the editor appends an OTHER booking so that the sum
+becomes the new value, stores the new value as the balance and updates both
+header copies. A save edited this way loads in the game with the new balance.
+
+### Where the journal is
+
+The player's journal sits at a fixed place in the entity data, near the start
+of the stream (between offsets 973,548 and 2,001,292 in the 198 catalog saves
+that load). It follows a table of the "edge_addons/*.edge" resources:
+
+```
+count × { str mod, str path, u32 index }   // base game: path ends "barrier_track_b.edge", index 5
+u32 ?                                      // 18, 21 or 24
+vec<u32> ids
+u32 ?
+u32 1
+u8 0
+journal
+```
+
+The `u32` before the ids is 24 in 415 of 766 saves checked, 18 in 337 and 21
+in 14 (all early games, experience 2,046 or less). It is 18 in 292 of the 315
+map-editor saves, 24 in 22 and 21 in 1. It does not follow the format version,
+the climate, the number of mods, the map size or the start year.
+
+Mods add their own entries after the base game's. The stored balance is not
+used to find the journal, so it is found when the header money is 0 or does
+not match. Map-editor saves have a journal at the same place. In 275 of the 316 saves in
+the map folders the header money and the stored balance are 0 while the
+amounts sum to a non-zero value. In one catalog save the journal starts 12 bytes after the usual
+place. The editor accepts that only if the stored balance equals the header's
+money.
+
+When the table is not found, the editor falls back to searching the stream
+for a journal whose stored balance equals the header's money and the sum of
+its amounts, and uses it only if exactly one matches.
 
 ## Game script states
 

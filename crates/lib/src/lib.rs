@@ -8,7 +8,8 @@
 //!
 //! Understood sections:
 //! * the header, parsed in full;
-//! * the player's [`journal`](journal::Journal), which defines the money;
+//! * the player's [`journal`](journal::Journal), which defines the money, found
+//!   by its place in the entity data;
 //! * the [game script states](scripts::ScriptStates);
 //! * the [calendar](calendar::Calendar), read only.
 
@@ -58,6 +59,20 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// How [`SaveFile::from_raw`] located the player's journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JournalLookup {
+    /// At its place after the edge-addon name table.
+    Position,
+    /// Not there; the only journal whose balance equals the header money.
+    Balance,
+    /// Not there; this many journals have a balance equal to the header
+    /// money, so none was chosen.
+    Ambiguous(usize),
+    /// Not there, and no journal has a balance equal to the header money.
+    Missing,
+}
+
 /// A loaded save. Edit the public fields, then call [`SaveFile::to_bytes`].
 pub struct SaveFile {
     pub header: Header,
@@ -70,9 +85,8 @@ pub struct SaveFile {
     header_len: usize,
     journal_span: Option<(usize, usize)>,
     scripts_span: Option<(usize, usize)>,
-    /// Number of journals that matched the balance; more than one means the
-    /// money section is ambiguous and is left read-only.
-    pub journal_matches: usize,
+    /// How the journal was found. Without one, money is read-only.
+    pub journal_lookup: JournalLookup,
 }
 
 impl SaveFile {
@@ -94,14 +108,23 @@ impl SaveFile {
         let header = Header::read(&mut r)?;
         let header_len = r.pos();
 
-        let mut journals = Journal::find_with_balance(&raw, header_len, header.money);
-        let journal_matches = journals.len();
-        let (journal, journal_span) = if journal_matches == 1 {
-            let (at, j) = journals.pop().expect("one match");
-            let len = 4 + j.entries.len() * journal::ENTRY_SIZE + 8;
-            (Some(j), Some((at, len)))
-        } else {
-            (None, None)
+        let (found, journal_lookup) = match Journal::find_by_position(&raw, header_len, header.money) {
+            Some(found) => (Some(found), JournalLookup::Position),
+            None => {
+                let mut by_balance = Journal::find_with_balance(&raw, header_len, header.money);
+                match by_balance.len() {
+                    0 => (None, JournalLookup::Missing),
+                    1 => (by_balance.pop(), JournalLookup::Balance),
+                    n => (None, JournalLookup::Ambiguous(n)),
+                }
+            }
+        };
+        let (journal, journal_span) = match found {
+            Some((at, j)) => {
+                let len = 4 + j.entries.len() * journal::ENTRY_SIZE + 8;
+                (Some(j), Some((at, len)))
+            }
+            None => (None, None),
         };
 
         let (scripts, scripts_span) = match ScriptStates::locate(&raw, header_len) {
@@ -118,13 +141,24 @@ impl SaveFile {
             return Err(Error::Malformed { offset: ja, what: "journal overlaps script states".into() });
         }
 
-        Ok(Self { header, journal, scripts, calendar, raw, header_len, journal_span, scripts_span, journal_matches })
+        Ok(Self { header, journal, scripts, calendar, raw, header_len, journal_span, scripts_span, journal_lookup })
     }
 
-    /// Current money (the journal balance, or the header copy if the journal
-    /// was not found).
+    /// Current money (the sum of the journal's bookings, or the header copy if
+    /// the journal was not found).
     pub fn money(&self) -> i64 {
-        self.journal.as_ref().map_or(self.header.money, |j| j.balance)
+        self.journal.as_ref().map_or(self.header.money, Journal::money)
+    }
+
+    /// Why money is read-only, or `None` if the journal was found.
+    pub fn journal_problem(&self) -> Option<String> {
+        if self.journal.is_some() {
+            return None;
+        }
+        Some(match self.journal_lookup {
+            JournalLookup::Ambiguous(n) => format!("{n} journals have a balance equal to the header money"),
+            _ => "no journal found".to_string(),
+        })
     }
 
     /// Sets the player's money by booking an "Other" journal entry and

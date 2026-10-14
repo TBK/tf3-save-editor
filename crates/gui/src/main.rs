@@ -210,8 +210,8 @@ impl SaveEditor {
                 tf3save::KNOWN_VERSION
             ));
         }
-        if save.journal.is_none() {
-            notes.push("money section not found, money is read-only".into());
+        if let Some(why) = save.journal_problem() {
+            notes.push(format!("money section not found ({why}), money is read-only"));
         }
         if save.scripts.is_none() {
             notes.push("script state section not found".into());
@@ -485,7 +485,7 @@ impl SaveEditor {
             "Money section",
             match &save.journal {
                 Some(j) => format!("{} bookings", j.entries.len()),
-                None => format!("not found ({} candidates)", save.journal_matches),
+                None => format!("not found ({})", save.journal_problem().unwrap_or_default()),
             },
         ));
         facts.push((
