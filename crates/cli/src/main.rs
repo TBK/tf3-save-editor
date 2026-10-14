@@ -262,6 +262,10 @@ fn info(s: &SaveFile) -> Result<()> {
     println!("version:   {}", h.version);
     let (y, m, d) = h.calendar_date();
     println!("date:      {y}-{m:02}-{d:02}");
+    println!("started:   {}", h.start_year);
+    println!("map:       {} x {} m", h.map_width, h.map_height);
+    let achievements = if h.achievements_earnable == 0 { "cannot be earned" } else { "can be earned" };
+    println!("achievements: {achievements}");
     println!("experience: {}", h.experience);
     println!("money:     {}", s.money());
     for m in &h.mods {
