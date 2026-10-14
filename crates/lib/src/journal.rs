@@ -1,16 +1,40 @@
 //! The player's financial journal.
 //!
 //! The engine keeps one journal per entity: a time-ordered list of booked
-//! amounts, followed by the cached balance (the sum of all amounts). The
-//! player's money is that balance, so changing money means booking an entry.
+//! amounts, followed by a cached balance. The player's money is the sum of
+//! the amounts; the cached balance (which the header copies) differs from it
+//! in some saves. Changing money means booking an entry.
 //!
 //! Layout: `u32 count`, then `count` × (`i64 time`, `i64 amount`,
 //! 5 × `u8` category), then `i64 balance`.
+//!
+//! The player's journal sits at a fixed place in the entity data: after the
+//! edge-addon name table ([`Journal::find_by_position`]).
 
 use crate::io::{Reader, Writer};
 use crate::{Error, Result};
 
 pub const ENTRY_SIZE: usize = 21;
+
+/// Resource path of the base game's last edge-addon entry in the name table.
+const EDGE_TABLE_ANCHOR: &[u8] = b"edge_addons/barrier_track_b.edge";
+
+/// Longest `vec<u32>` accepted between the name table and the journal.
+const MAX_IDS: u32 = 1 << 20;
+
+/// How far past the usual place a journal start is looked for, in bytes.
+const LATE_START_WINDOW: usize = 64;
+
+fn read_u32(data: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?))
+}
+
+/// End of the length-prefixed printable ASCII string at `at`.
+fn skip_text(data: &[u8], at: usize) -> Option<usize> {
+    let len = read_u32(data, at)? as usize;
+    let end = at.checked_add(4 + len)?;
+    (len <= 512 && data.get(at + 4..end)?.iter().all(|b| (0x20..0x7f).contains(b))).then_some(end)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Category {
@@ -105,36 +129,43 @@ pub struct Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Journal {
     pub entries: Vec<Entry>,
+    /// The stored balance. Equal to [`Journal::sum`] in most saves.
     pub balance: i64,
 }
 
 impl Journal {
+    /// Sum of all booked amounts.
     pub fn sum(&self) -> i128 {
         self.entries.iter().map(|e| e.amount as i128).sum()
     }
 
-    /// Books an `Other` entry so the balance becomes `target`. The entry is
-    /// stamped with the latest time already in the journal, which keeps the
-    /// list ordered as the engine requires.
+    /// The player's money: [`Journal::sum`], limited to the `i64` range.
+    pub fn money(&self) -> i64 {
+        self.sum().clamp(i64::MIN as i128, i64::MAX as i128) as i64
+    }
+
+    /// Books an `Other` entry so the money becomes `target`, and stores
+    /// `target` as the balance. The entry is stamped with the latest time
+    /// already in the journal, which keeps the list ordered as the engine
+    /// requires.
     pub fn set_balance(&mut self, target: i64) -> Result<()> {
-        let delta = (target as i128) - (self.balance as i128);
-        if delta == 0 {
-            return Ok(());
+        let delta = (target as i128) - self.sum();
+        if delta != 0 {
+            let amount = i64::try_from(delta).map_err(|_| Error::Invalid("money change too large".into()))?;
+            let time = self.entries.last().map_or(0, |e| e.time);
+            self.entries.push(Entry { time, amount, category: Category::OTHER });
         }
-        let amount = i64::try_from(delta).map_err(|_| Error::Invalid("money change too large".into()))?;
-        let time = self.entries.last().map_or(0, |e| e.time);
-        self.entries.push(Entry { time, amount, category: Category::OTHER });
         self.balance = target;
         Ok(())
     }
 
-    /// Validating parse. Used both for loading and for locating journals.
+    /// Validating parse. Used both for loading and for locating journals. The
+    /// stored balance is read as it is and not compared with the sum.
     pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self> {
         let start = r.pos();
         let n = r.count(ENTRY_SIZE)?;
         let mut entries = Vec::with_capacity(n);
         let mut last_time = i64::MIN;
-        let mut sum: i128 = 0;
         for _ in 0..n {
             let time = r.i64()?;
             let amount = r.i64()?;
@@ -143,13 +174,9 @@ impl Journal {
                 return Err(Error::Malformed { offset: start, what: "not a journal".into() });
             }
             last_time = time;
-            sum += amount as i128;
             entries.push(Entry { time, amount, category });
         }
         let balance = r.i64()?;
-        if balance as i128 != sum {
-            return Err(Error::Malformed { offset: start, what: "journal balance mismatch".into() });
-        }
         Ok(Self { entries, balance })
     }
 
@@ -164,10 +191,56 @@ impl Journal {
     }
 
     /// Finds every non-empty journal in `data[from..]` whose cached balance
-    /// equals `balance`. Returns `(offset, journal)` pairs.
+    /// equals `balance` and equals the sum of its amounts. Returns
+    /// `(offset, journal)` pairs.
     pub(crate) fn find_with_balance(data: &[u8], from: usize, balance: i64) -> Vec<(usize, Journal)> {
         let found = Self::find_by_balance_bytes(data, from, balance);
         if found.is_empty() { Self::find_by_linear_scan(data, from, balance) } else { found }
+    }
+
+    /// Finds the player's journal by its place in the entity data. Returns
+    /// the offset and the journal.
+    ///
+    /// The journal follows the edge-addon name table: entries of
+    /// (`str` owning mod, `str` resource path, `u32` index), the base game's
+    /// last one being "barrier_track_b.edge" with index 5. After the table
+    /// come a `u32`, a `vec<u32>`, a `u32` and the bytes `01 00 00 00 00`, and
+    /// then the journal. Its stored balance equals the header money or the
+    /// sum of its amounts. Up to 64 bytes further on, a non-empty journal is
+    /// accepted if its stored balance equals `header_money`.
+    pub(crate) fn find_by_position(data: &[u8], from: usize, header_money: i64) -> Option<(usize, Journal)> {
+        for hit in memchr::memmem::find_iter(&data[from..], EDGE_TABLE_ANCHOR) {
+            let mut at = from + hit + EDGE_TABLE_ANCHOR.len();
+            if read_u32(data, at) != Some(5) {
+                continue;
+            }
+            at += 4;
+            // Entries added by mods follow the base game's.
+            while let Some(path_at) = skip_text(data, at)
+                && let Some(end) = skip_text(data, path_at).filter(|&e| e > path_at + 4)
+                && read_u32(data, end).is_some()
+            {
+                at = end + 4;
+            }
+            let Some(ids) = read_u32(data, at + 4).filter(|&n| n <= MAX_IDS) else { continue };
+            let usual = at + 8 + ids as usize * 4 + 4 + 5;
+            if read_u32(data, usual - 5) == Some(1)
+                && data.get(usual - 1) == Some(&0)
+                && let Ok(j) = Journal::read(&mut Reader::at(data, usual))
+                && (j.balance == header_money || j.balance as i128 == j.sum())
+            {
+                return Some((usual, j));
+            }
+            for start in usual + 1..usual + LATE_START_WINDOW {
+                if let Ok(j) = Journal::read(&mut Reader::at(data, start))
+                    && !j.entries.is_empty()
+                    && j.balance == header_money
+                {
+                    return Some((start, j));
+                }
+            }
+        }
+        None
     }
 
     /// Fast path: SIMD-search the balance bytes, then walk back over
@@ -198,6 +271,7 @@ impl Journal {
                 let start = entry_at - 4;
                 if u32::from_le_bytes(data[start..entry_at].try_into().unwrap()) as usize == k
                     && let Ok(j) = Journal::read(&mut Reader::at(data, start))
+                    && j.sum() == j.balance as i128
                 {
                     found.push((start, j));
                     search_from = bal_at + 8;
@@ -223,6 +297,7 @@ impl Journal {
                 && data[bal_at..bal_at + 8] == target
                 && Category::from_bytes(&data[p + 20..p + 25]).is_valid()
                 && let Ok(j) = Journal::read(&mut Reader::at(data, p))
+                && j.sum() == j.balance as i128
             {
                 found.push((p, j));
                 p = bal_at + 8;
@@ -286,5 +361,93 @@ mod tests {
         let last = j.entries.last().unwrap();
         assert_eq!(last.time, 20);
         assert_eq!(last.category, Category::OTHER);
+    }
+
+    /// Name table with a mod's entry after the base game's last one, then
+    /// the bytes that precede the journal.
+    fn entity_data(journal: &Journal, extra_gap: usize) -> (Vec<u8>, usize) {
+        let mut w = Writer::new();
+        w.bytes(&[0xAA; 9]);
+        w.string(b"");
+        w.string(b"infrastructure/edge_addons/barrier_track_b.edge");
+        w.u32(5);
+        w.string(b"some_mod");
+        w.string(b"edge_addons/some_mod_post.edge");
+        w.u32(6);
+        w.u32(24);
+        w.u32(3);
+        (10..13).for_each(|id| w.u32(id));
+        w.u32(13);
+        if extra_gap == 0 {
+            w.u32(1);
+            w.u8(0);
+        } else {
+            w.bytes(&[1, 1]);
+            w.bytes(&vec![0; extra_gap + 3]);
+        }
+        let at = w.buf.len();
+        journal.write(&mut w);
+        w.bytes(&[0; 7]);
+        (w.buf, at)
+    }
+
+    #[test]
+    fn locate_by_position_ignores_the_balance() {
+        let mut j = sample();
+        j.balance = 0;
+        let (data, at) = entity_data(&j, 0);
+        let (found_at, found) = Journal::find_by_position(&data, 0, 0).unwrap();
+        assert_eq!(found_at, at);
+        assert_eq!(found, j);
+        assert_eq!(found.money(), 700);
+    }
+
+    #[test]
+    fn locate_by_position_finds_an_empty_journal() {
+        let j = Journal { entries: vec![], balance: 0 };
+        let (data, at) = entity_data(&j, 0);
+        assert_eq!(Journal::find_by_position(&data, 0, 0).unwrap().0, at);
+    }
+
+    #[test]
+    fn locate_by_position_accepts_a_later_start_only_with_the_header_money() {
+        let mut j = sample();
+        j.balance = -5;
+        let (data, at) = entity_data(&j, 12);
+        assert_eq!(Journal::find_by_position(&data, 0, -5).unwrap().0, at);
+        assert!(Journal::find_by_position(&data, 0, 700).is_none());
+    }
+
+    #[test]
+    fn locate_by_position_rejects_an_empty_journal_with_a_foreign_balance() {
+        let j = Journal { entries: vec![], balance: 99 };
+        let (data, _) = entity_data(&j, 0);
+        assert!(Journal::find_by_position(&data, 0, 0).is_none());
+        assert!(Journal::find_by_position(&data, 0, 99).is_some());
+    }
+
+    #[test]
+    fn locate_by_position_needs_the_name_table() {
+        let mut w = Writer::new();
+        sample().write(&mut w);
+        assert!(Journal::find_by_position(&w.buf, 0, 700).is_none());
+    }
+
+    #[test]
+    fn money_is_the_sum_when_the_stored_balance_differs() {
+        let mut j = sample();
+        j.balance = 0;
+        assert_eq!(j.money(), 700);
+        j.set_balance(5_000_000).unwrap();
+        assert_eq!((j.money(), j.balance), (5_000_000, 5_000_000));
+        assert_eq!(j.entries.last().unwrap().amount, 4_999_300);
+    }
+
+    #[test]
+    fn set_balance_to_the_sum_only_stores_it() {
+        let mut j = sample();
+        j.balance = 0;
+        j.set_balance(700).unwrap();
+        assert_eq!((j.entries.len(), j.balance), (2, 700));
     }
 }

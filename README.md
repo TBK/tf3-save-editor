@@ -129,11 +129,11 @@ TF3_TEST_SAVE=~/game.sav cargo test -p tf3save
 
 See [docs/FORMAT.md](docs/FORMAT.md) for the save format. In
 short: the save is a zstd-compressed sequential stream. The header is parsed
-in full. The money journal and the script states are found by validated
-search, re-serialised after editing, and spliced back between the untouched
-bytes. Loading a save and writing it back unchanged reproduces the game's
-uncompressed data byte for byte, which shows every parsed field is written
-back exactly. The `.sav` file itself can still differ in size, because the
+in full. The money journal is found by its place in the entity data and the
+script states by validated search. Both are re-serialised after editing and
+spliced back between the untouched bytes. Loading a save and writing it
+back unchanged reproduces the game's uncompressed data byte for byte, which
+shows every parsed field is written back exactly. The `.sav` file itself can still differ in size, because the
 editor's zstd compression settings aren't identical to the game's.
 
 ## License

@@ -29,7 +29,7 @@ fn unmodified_roundtrip_is_byte_identical() {
     let compressed = std::fs::read(&path).unwrap();
     let raw = tf3save::decompress(&compressed).unwrap();
     let save = SaveFile::from_raw(raw.clone()).unwrap();
-    assert!(save.journal.is_some(), "journal not found ({} matches)", save.journal_matches);
+    assert!(save.journal.is_some(), "journal not found ({:?})", save.journal_lookup);
     assert!(save.scripts.is_some(), "script states not found");
     assert!(save.to_raw() == raw, "re-serialised save differs");
 }

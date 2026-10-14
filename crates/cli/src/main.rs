@@ -153,7 +153,7 @@ fn main() -> Result<()> {
             for e in &j.entries[skip..] {
                 println!("{:>12}  {:>14}  {}", e.time, e.amount, e.category.label());
             }
-            println!("{} entries, balance {}", j.entries.len(), j.balance);
+            println!("{} entries, balance {}", j.entries.len(), j.money());
             Ok(())
         }
         Command::Settings { save, set, out } => {
@@ -275,8 +275,8 @@ fn info(s: &SaveFile) -> Result<()> {
     }
     println!("size:      {} bytes uncompressed", s.raw_len());
     match &s.journal {
-        Some(j) => println!("journal:   {} entries, balance {}", j.entries.len(), format_number(j.balance as f64)),
-        None => println!("journal:   not found ({} candidates) — money is read-only", s.journal_matches),
+        Some(j) => println!("journal:   {} entries, balance {}", j.entries.len(), format_number(j.money() as f64)),
+        None => println!("journal:   not found ({}) — money is read-only", s.journal_problem().unwrap_or_default()),
     }
     match &s.scripts {
         Some(sc) => println!("scripts:   {} game script states", sc.scripts.len()),
