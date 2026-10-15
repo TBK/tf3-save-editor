@@ -151,7 +151,12 @@ fn main() -> Result<()> {
             let j = s.journal.as_ref().context("player journal not found")?;
             let skip = j.entries.len().saturating_sub(last);
             for e in &j.entries[skip..] {
-                println!("{:>12}  {:>14}  {}", e.time, e.amount, e.category.label());
+                // Dated from the save's day table; the raw game clock if it has none.
+                let when = match s.calendar.as_ref().and_then(|c| c.date_at(e.time)) {
+                    Some(date) => ymd(date),
+                    None => format!("t={}", e.time),
+                };
+                println!("{when:>12}  {:>14}  {}", e.amount, e.category.label());
             }
             println!("{} entries, balance {}", j.entries.len(), j.money());
             Ok(())
@@ -219,9 +224,9 @@ fn main() -> Result<()> {
 
 fn open(path: &Path) -> Result<SaveFile> {
     let s = SaveFile::open(path).with_context(|| format!("reading {}", path.display()))?;
-    if s.header.version != tf3save::KNOWN_VERSION {
+    if s.header.version > tf3save::KNOWN_VERSION {
         eprintln!(
-            "warning: save format version {} (this tool was built for {}); verify results in game",
+            "warning: save format version {} is newer than the newest tested ({}); verify results in game",
             s.header.version,
             tf3save::KNOWN_VERSION
         );
@@ -258,35 +263,45 @@ fn find_script(s: &SaveFile, name: &str) -> Result<usize> {
 
 fn info(s: &SaveFile) -> Result<()> {
     let h = &s.header;
-    println!("title:     {}", h.title());
-    println!("version:   {}", h.version);
-    let (y, m, d) = h.calendar_date();
-    println!("date:      {y}-{m:02}-{d:02}");
-    println!("started:   {}", h.start_year);
-    println!("map:       {} x {} m", h.map_width, h.map_height);
-    let achievements = if h.achievements_earnable == 0 { "cannot be earned" } else { "can be earned" };
-    println!("achievements: {achievements}");
-    println!("experience: {}", h.experience);
-    println!("money:     {}", s.money());
+    let line = |label: &str, value: String| println!("{:<14}{value}", format!("{label}:"));
+    line("title", h.title());
+    line("version", h.version.to_string());
+    line("date", ymd(h.calendar_date()));
+    line("started", h.start_year.to_string());
+    line("map", format!("{} x {} m", h.map_width, h.map_height));
+    line("achievements", if h.achievements_earnable == 0 { "cannot be earned" } else { "can be earned" }.into());
+    line("experience", h.experience.to_string());
+    line("money", s.money().to_string());
     for m in &h.mods {
-        println!("mod:       {} ({})", m.name, m.id);
+        line("mod", format!("{} ({})", m.name, m.id));
     }
     for (k, v) in &h.config.resources {
-        println!("{:<10} {}", format!("{k}:"), v);
+        line(&k.to_string(), v.to_string());
     }
     if let Some(t) = &h.thumbnail {
-        println!("preview:   {}x{}", t.width, t.height);
+        line("preview", format!("{}x{}", t.width, t.height));
     }
-    println!("size:      {} bytes uncompressed", s.raw_len());
-    match &s.journal {
-        Some(j) => println!("journal:   {} entries, balance {}", j.entries.len(), format_number(j.money() as f64)),
-        None => println!("journal:   not found ({}) — money is read-only", s.journal_problem().unwrap_or_default()),
-    }
-    match &s.scripts {
-        Some(sc) => println!("scripts:   {} game script states", sc.scripts.len()),
-        None => println!("scripts:   not found"),
-    }
+    line("size", format!("{} bytes uncompressed", s.raw_len()));
+    line(
+        "journal",
+        match &s.journal {
+            Some(j) => format!("{} entries, balance {}", j.entries.len(), format_number(j.money() as f64)),
+            None => format!("not found ({}) — money is read-only", s.journal_problem().unwrap_or_default()),
+        },
+    );
+    line(
+        "scripts",
+        match &s.scripts {
+            Some(sc) => format!("{} game script states", sc.scripts.len()),
+            None => "not found".into(),
+        },
+    );
     Ok(())
+}
+
+/// `(year, month, day)` as `YYYY-MM-DD`.
+fn ymd((y, m, d): (i64, u32, u32)) -> String {
+    format!("{y}-{m:02}-{d:02}")
 }
 
 #[cfg(test)]
@@ -327,6 +342,12 @@ mod tests {
         assert!(
             matches!(cli.command, Command::Set { ref save, ref value, .. } if save == Path::new("a.sav") && value == "-5")
         );
+    }
+
+    #[test]
+    fn dates_are_zero_padded() {
+        assert_eq!(ymd((1900, 1, 2)), "1900-01-02");
+        assert_eq!(ymd((2191, 12, 31)), "2191-12-31");
     }
 
     #[test]

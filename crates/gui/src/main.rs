@@ -203,9 +203,9 @@ impl SaveEditor {
         cx: &mut Context<Self>,
     ) {
         let mut notes = Vec::new();
-        if save.header.version != tf3save::KNOWN_VERSION {
+        if save.header.version > tf3save::KNOWN_VERSION {
             notes.push(format!(
-                "save format version {} differs from the tested version {}",
+                "save format version {} is newer than the newest tested ({})",
                 save.header.version,
                 tf3save::KNOWN_VERSION
             ));
@@ -474,6 +474,9 @@ impl SaveEditor {
                 let (y, m, d) = h.calendar_date();
                 format!("{y}-{m:02}-{d:02}")
             }),
+            ("Started", h.start_year.to_string()),
+            ("Map", format!("{} × {} m", group(h.map_width.into()), group(h.map_height.into()))),
+            ("Achievements", if h.achievements_earnable == 0 { "cannot be earned" } else { "can be earned" }.into()),
             ("Experience", h.experience.to_string()),
             ("Money", group(save.money())),
             ("Format version", h.version.to_string()),

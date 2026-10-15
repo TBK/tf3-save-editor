@@ -9,7 +9,7 @@
 //! 5 × `u8` category), then `i64 balance`.
 //!
 //! The player's journal sits at a fixed place in the entity data: after the
-//! edge-addon name table ([`Journal::find_by_position`]).
+//! edge-addon name table (see `docs/FORMAT.md`, "Where the journal is").
 
 use crate::io::{Reader, Writer};
 use crate::{Error, Result};

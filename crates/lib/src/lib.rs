@@ -31,7 +31,7 @@ use scripts::ScriptStates;
 /// Save format version this crate was written against.
 pub const KNOWN_VERSION: u32 = 604;
 
-/// Oldest format version [`Header::read`] accepts. Versions 599 and 601 have
+/// Oldest format version [`SaveFile::from_raw`] accepts. Versions 599 and 601 have
 /// the same header as 604. Older ones (568 and 585 were seen) share it up to
 /// the preview and then differ, so they are rejected instead of failing deep
 /// in the stats block.

@@ -23,7 +23,9 @@ pub struct Header {
     /// The date shown in the game, as a Julian day number (2415021 is
     /// 1 January 1900). See [`Header::calendar_date`].
     pub date: u32,
-    /// Player balance as shown in the load dialog. Mirrors the journal balance.
+    /// Balance shown in the load dialog: a copy of the journal's stored
+    /// balance. That can differ from the money, which is the sum of the
+    /// bookings ([`crate::journal::Journal::money`]).
     pub money: i64,
     /// Copy of the company's experience points, which grow with play. Not
     /// the calendar year. It can lag the script state: usually by a few
