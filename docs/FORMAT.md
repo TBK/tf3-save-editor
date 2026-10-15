@@ -159,11 +159,11 @@ the climate, the number of mods, the map size or the start year.
 
 Mods add their own entries after the base game's. The stored balance is not
 used to find the journal, so it is found when the header money is 0 or does
-not match. Map-editor saves have a journal at the same place. In 275 of the 316 saves in
-the map folders the header money and the stored balance are 0 while the
-amounts sum to a non-zero value. In one catalog save the journal starts 12 bytes after the usual
-place. The editor accepts that only if the stored balance equals the header's
-money.
+not match. Map-editor saves have a journal at the same place. In 275 of the
+316 saves in the map folders the header money and the stored balance are 0
+while the amounts sum to a non-zero value. In one catalog save the journal
+starts 12 bytes after the usual place. The editor accepts that only if the
+stored balance equals the header's money.
 
 When the table is not found, the editor falls back to searching the stream
 for a journal whose stored balance equals the header's money and the sum of

@@ -383,7 +383,10 @@ impl SaveEditor {
         let cleaned: String = input.chars().filter(|c| !matches!(c, '_' | ',' | ' ' | '$')).collect();
         let Some(save) = self.save.as_mut() else { return };
         match cleaned.parse::<i64>() {
-            Ok(v) if v == save.money() => {}
+            // Nothing to do only if the header copy agrees too: in some saves
+            // the stored balance (and so the header) differs from the sum, and
+            // applying the same value brings them back in line.
+            Ok(v) if v == save.money() && v == save.header.money => {}
             Ok(v) => match save.set_money(v) {
                 Ok(()) => {
                     self.dirty = true;
